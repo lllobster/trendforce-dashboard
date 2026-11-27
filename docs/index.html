@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#09090b">
+  <title>TrendForce 存储半导体价格看板</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js" defer></script>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; background: #09090b; color: #fff; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 40px; }
+    header { margin-bottom: 40px; }
+    .badge { display: inline-flex; align-items: center; gap: 12px; padding: 12px 24px; border: 1.5px solid #67def959; border-radius: 30px; background: #67def91a; box-shadow: 0 0 16px #67def91f; color: #67def9; font-size: 30px; font-weight: 800; letter-spacing: 1px; }
+    .badge svg { width: 30px; height: 30px; flex: none; }
+    h1 { margin: 18px 0 6px; color: #d4d4d8; font-size: 24px; font-weight: 500; }
+    .subtitle { margin: 0; color: #a1a1aa; font-size: 16px; }
+    .meta { margin: 16px 0 0; color: #a1a1aa; font-size: 14px; line-height: 1.6; }
+    .meta a, footer a { color: #67def9; }
+    main { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 24px; }
+    .card { min-width: 0; display: flex; flex-direction: column; padding: 20px; border: 1px solid #27272a; border-radius: 12px; background: #121214; transition: border-color .2s; }
+    .card:hover, .card:focus-within { border-color: #3f3f46; }
+    .card-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+    .unit { margin-top: 5px; color: #a1a1aa; font-size: 14px; font-weight: 400; }
+    .value { white-space: nowrap; color: #67def9; font: 700 24px ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .chart { width: 100%; height: 200px; min-height: 200px; }
+    .point-date { min-height: 18px; margin-top: 4px; color: #a1a1aa; font-size: 14px; }
+    .message { grid-column: 1/-1; padding: 24px; border: 1px solid #27272a; border-radius: 12px; color: #d4d4d8; }
+    footer { margin-top: 32px; color: #a1a1aa; font-size: 14px; line-height: 1.6; }
+    @media (max-width: 600px) { body { padding: 20px; } .badge { font-size: 22px; padding: 10px 16px; } main { grid-template-columns: minmax(0, 1fr); gap: 16px; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="badge">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+      存储价格观察
+    </div>
+    <h1>TrendForce 存储半导体价格看板</h1>
+    <p class="subtitle">每日 DRAM 与 NAND Flash 现货均价追踪</p>
+    <p class="meta" id="updated">正在加载价格数据…</p>
+  </header>
+  <main id="cards" aria-live="polite"></main>
+  <footer>数据来源：<a href="https://www.trendforce.cn/price" target="_blank" rel="noopener">TrendForce DRAM</a>、<a href="https://www.trendforce.cn/price/flash" target="_blank" rel="noopener">TrendForce NAND Flash</a>。价格单位为美元，仅展示公开页面的盘平均数据。</footer>
+  <script>
+    window.addEventListener('load', async () => {
+      const container = document.getElementById('cards');
+      const updated = document.getElementById('updated');
+      const charts = [];
+      try {
+        const response = await fetch('./data/history.json', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        const series = Object.values(payload.series || {});
+        if (!series.length) throw new Error('尚无价格数据；请先运行 GitHub Actions 更新任务。');
+        updated.textContent = `最近检查：${payload.checked_at || '未知'} · DRAM 来源日期：${payload.source_dates?.DRAM || '未知'} · NAND 来源日期：${payload.source_dates?.['NAND Flash'] || '未知'}`;
+
+        series.forEach((item) => {
+          const points = Array.isArray(item.points) ? item.points : [];
+          const last = points.at(-1);
+          const card = document.createElement('section');
+          card.className = 'card';
+          const head = document.createElement('div');
+          head.className = 'card-head';
+          const title = document.createElement('div');
+          title.className = 'name';
+          title.textContent = item.name;
+          const unit = document.createElement('div');
+          unit.className = 'unit';
+          unit.textContent = '盘平均 (USD)';
+          title.appendChild(unit);
+          const value = document.createElement('div');
+          value.className = 'value';
+          value.textContent = last ? `$${Number(last.value).toFixed(2)}` : '—';
+          head.append(title, value);
+          const plot = document.createElement('div');
+          plot.className = 'chart';
+          plot.setAttribute('role', 'img');
+          plot.setAttribute('aria-label', `${item.name}历史价格走势`);
+          const date = document.createElement('div');
+          date.className = 'point-date';
+          date.textContent = last ? `最新来源日期：${last.date}` : '等待数据';
+          card.append(head, plot, date);
+          container.appendChild(card);
+
+          const chart = echarts.init(plot);
+          chart.setOption({
+            tooltip: { trigger: 'axis', valueFormatter: (v) => `$${Number(v).toFixed(2)}` },
+            grid: { left: '2%', right: '2%', top: '6%', bottom: '5%', containLabel: true },
+            xAxis: { type: 'category', data: points.map(p => p.date), boundaryGap: false, axisLine: { lineStyle: { color: '#3f3f46' } }, axisLabel: { color: '#a1a1aa', fontSize: 11, margin: 12 } },
+            yAxis: { type: 'value', scale: true, splitLine: { lineStyle: { color: '#27272a', type: 'dashed' } }, axisLabel: { color: '#a1a1aa', fontSize: 11 } },
+            series: [{ type: 'line', data: points.map(p => p.value), smooth: true, connectNulls: false, showSymbol: points.length < 3, symbolSize: 5, lineStyle: { width: 2, color: '#67def9' }, itemStyle: { color: '#67def9' }, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(103,222,249,.2)' }, { offset: 1, color: 'rgba(103,222,249,0)' }]) } }]
+          });
+          charts.push(chart);
+        });
+        window.addEventListener('resize', () => charts.forEach(chart => chart.resize()));
+      } catch (error) {
+        updated.textContent = '数据暂不可用';
+        const message = document.createElement('div');
+        message.className = 'message';
+        message.textContent = error.message;
+        container.appendChild(message);
+      }
+    });
+  </script>
+</body>
+</html>
